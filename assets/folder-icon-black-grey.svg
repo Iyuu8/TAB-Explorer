@@ -1,0 +1,4 @@
+<svg viewBox="0 0 16 13" xmlns="http://www.w3.org/2000/svg" width="320" height="260">
+  <path id="folder-back" d="M0 2.4C0 1.4 0.8 0.6 1.8 0.6H6L7.4 2H14.2C15.2 2 16 2.8 16 3.8V10.6C16 11.6 15.2 12.4 14.2 12.4H1.8C0.8 12.4 0 11.6 0 10.6V2.4Z" fill="#242424"/>
+  <path id="folder-front" d="M0 4.2H16V10.6C16 11.6 15.2 12.4 14.2 12.4H1.8C0.8 12.4 0 11.6 0 10.6V4.2Z" fill="#2B2B2B"/>
+</svg>

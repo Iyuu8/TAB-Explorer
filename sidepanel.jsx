@@ -1,4 +1,4 @@
-import React, { useRef } from "react"
+import React, { useRef, useState } from "react"
 import { Maximize2, FolderPlus, Link2, ChevronRight } from "lucide-react"
 
 import logo from "./assets/logo.png"
@@ -22,6 +22,7 @@ import Modal from "./core/sidepanel/components/Modal"
 export default function SidePanel() {
   const engine = useTabExplorer()
   const importInputRef = useRef(null)
+  const [wsHeaderDragOver, setWsHeaderDragOver] = useState(false)
   const {
     workspaces, activeWorkspace, activeWorkspaceId, loaded,
     selection, selectedFolderId,
@@ -124,12 +125,34 @@ export default function SidePanel() {
       {activeWorkspace ? (
         <>
           <div
-            className={`ws-header${isWorkspaceRowSelected ? " ws-header-selected" : ""}`}
+            className={`ws-header${isWorkspaceRowSelected ? " ws-header-selected" : ""}${wsHeaderDragOver ? " ws-header-drop-target" : ""}`}
             onClick={(e) => {
               e.stopPropagation()
               clickSelect("workspace", activeWorkspace.id, e)
             }}
             onContextMenu={(e) => openContextMenu(e, { type: "workspace", id: activeWorkspace.id })}
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setWsHeaderDragOver(true)
+            }}
+            onDragLeave={(e) => {
+              e.stopPropagation()
+              setWsHeaderDragOver(false)
+            }}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setWsHeaderDragOver(false)
+              const raw = e.dataTransfer.getData("text/plain")
+              if (!raw) return
+              try {
+                const items = JSON.parse(raw)
+                engine.moveItems(items, null)
+              } catch {
+                // ignore malformed payloads
+              }
+            }}
           >
             <div className="ws-header-title">
               <button

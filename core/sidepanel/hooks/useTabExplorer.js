@@ -500,6 +500,41 @@ export function useTabExplorer() {
   }
 
   // -------------------------------------------------------------------
+  // Drag & drop: move folders/links directly to a new parent (or the
+  // workspace root when targetFolderId is null), without going through
+  // the clipboard. Shares the same "no dropping a folder into itself or
+  // its own descendants" guard as cut/paste.
+  // -------------------------------------------------------------------
+  function moveItems(items, targetFolderId) {
+    if (!items || !items.length) return
+
+    const folderItems = items.filter((i) => i.type === "folder")
+    const linkItems = items.filter((i) => i.type === "link")
+
+    const validFolderIds = new Set(
+      folderItems
+        .filter((i) => i.id !== targetFolderId)
+        .filter((i) => {
+          const { folderIds: desc } = collectDescendants(i.id)
+          return !desc.includes(targetFolderId)
+        })
+        .map((i) => i.id)
+    )
+    const validLinkIds = new Set(linkItems.map((i) => i.id))
+
+    const changedFolders = folders.some((f) => validFolderIds.has(f.id) && f.parentId !== targetFolderId)
+    const changedLinks = links.some((l) => validLinkIds.has(l.id) && l.parentId !== targetFolderId)
+    if (!changedFolders && !changedLinks) return
+
+    pushHistory()
+    const now = Date.now()
+    setFolders((prev) => prev.map((f) => (validFolderIds.has(f.id) ? { ...f, parentId: targetFolderId, updatedAt: now } : f)))
+    setLinks((prev) => prev.map((l) => (validLinkIds.has(l.id) ? { ...l, parentId: targetFolderId, updatedAt: now } : l)))
+    if (targetFolderId) setExpanded((prev) => ({ ...prev, [targetFolderId]: true }))
+    setToast(`Moved ${validFolderIds.size + validLinkIds.size} item(s)`)
+  }
+
+  // -------------------------------------------------------------------
   // Chrome tabs integration
   // -------------------------------------------------------------------
   function queryCurrentTabs() {
@@ -715,6 +750,8 @@ export function useTabExplorer() {
     search, setSearch,
     // clipboard
     clipboard, copySelection, pasteInto, pasteTargetFolderId,
+    // drag & drop
+    moveItems,
     // context menu
     contextMenu, openContextMenu, setContextMenu,
     // modal

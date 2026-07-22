@@ -179,6 +179,13 @@ export function useTabExplorer() {
     [childFolders, childLinks]
   )
 
+  const globalChildFolders = useCallback((parentId) => sortFolders(folders.filter((f) => f.parentId === parentId)), [folders, sortFolders])
+  const globalChildLinks = useCallback((parentId) => links.filter((l) => l.parentId === parentId), [links])
+  const globalDirectCount = useCallback(
+    (folderId) => globalChildFolders(folderId).length + globalChildLinks(folderId).length,
+    [globalChildFolders, globalChildLinks]
+  )
+
   const countUnder = useCallback(
     (folderId) => {
       let count = 0
@@ -738,6 +745,7 @@ export function useTabExplorer() {
     // data
     workspaces, folders, links, activeWorkspaceId, activeWorkspace, expanded, loaded,
     wsFolders, wsLinks, childFolders, childLinks, directCount, countUnder, matchesSearch, query,
+    globalChildFolders, globalChildLinks, globalDirectCount,
     globalSearchResults, getWorkspaceName, getFolderPath,
     FOLDER_PALETTE,
     // workspace collapse (independent of the workspace switcher)

@@ -303,6 +303,7 @@ html, body, #__plasmo {
   transition: background .1s ease, color .1s ease;
 }
 
+
 /* Content wrapper: the ONLY draggable part of a row (chevron/actions live outside it). */
 .row-content {
   display: flex;
@@ -310,9 +311,8 @@ html, body, #__plasmo {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  cursor: grab;
+  cursor: pointer;
 }
-.row-content:active { cursor: grabbing; }
 
 .row:hover {
   background: var(--hover-bg);
@@ -653,9 +653,7 @@ html, body, #__plasmo {
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Drag & drop */
-.row-content[draggable="true"] {
-  cursor: grab;
-}
+
 .row-dragging {
   opacity: 0.4;
 }

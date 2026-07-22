@@ -70,6 +70,7 @@ export default function Tree({ engine }) {
     renamingId, renameDraft, setRenameDraft, commitRename, setRenamingId, startRename,
     openContextMenu, query, deleteOne, toggleFolderStarred, clearSelection,
     globalSearchResults, getFolderPath, getWorkspaceName,
+    globalChildFolders, globalChildLinks, globalDirectCount,
     moveItems
   } = engine
 
@@ -205,17 +206,17 @@ export default function Tree({ engine }) {
   // ---------------------------------------------------------------------
   // Normal (non-search) hierarchical tree — scoped to the active workspace.
   // ---------------------------------------------------------------------
-  function renderFolder(folder, depth) {
+  function renderFolder(folder, depth, global = false) {
     const isOpen = !!expanded[folder.id]
-    const kids = childFolders(folder.id)
-    const kidLinks = childLinks(folder.id)
-    const count = directCount(folder.id)
+    const kids = global ? globalChildFolders(folder.id) : childFolders(folder.id)
+    const kidLinks = global ? globalChildLinks(folder.id) : childLinks(folder.id)
+    const count = global ? globalDirectCount(folder.id) : directCount(folder.id)
     const selected = isSelected("folder", folder.id)
     const renaming = renamingId === `folder:${folder.id}`
-    const inScope = scopeIds.folders.has(folder.id)
+    const inScope = global ? false : scopeIds.folders.has(folder.id)
     const key = dragKey("folder", folder.id)
-    const isDropTarget = dragOverKey === key
-    const isDragging = draggingKeys ? draggingKeys.has(key) : false
+    const isDropTarget = global ? false : dragOverKey === key
+    const isDragging = global ? false : draggingKeys ? draggingKeys.has(key) : false
 
     return (
       <div key={folder.id}>
@@ -229,9 +230,11 @@ export default function Tree({ engine }) {
           onContextMenu={(e) => openContextMenu(e, { type: "folder", id: folder.id })}
           onMouseEnter={() => setHoveredFolderId(folder.id)}
           onMouseLeave={() => setHoveredFolderId((prev) => (prev === folder.id ? null : prev))}
-          onDragOver={(e) => handleDragOverTarget(e, key)}
-          onDragLeave={(e) => handleDragLeaveTarget(e, key)}
-          onDrop={(e) => handleDropTarget(e, folder.id)}
+          {...(!global ? {
+            onDragOver: (e) => handleDragOverTarget(e, key),
+            onDragLeave: (e) => handleDragLeaveTarget(e, key),
+            onDrop: (e) => handleDropTarget(e, folder.id)
+          } : {})}
         >
           {/* Dedicated, wider hitbox toggle — never part of the draggable content. */}
           <button
@@ -249,9 +252,11 @@ export default function Tree({ engine }) {
               accidentally starts a drag and always toggles reliably. */}
           <div
             className="row-content"
-            draggable={!renaming}
-            onDragStart={(e) => handleDragStart(e, "folder", folder.id)}
-            onDragEnd={handleDragEnd}
+            draggable={!renaming && !global}
+            {...(!global ? {
+              onDragStart: (e) => handleDragStart(e, "folder", folder.id),
+              onDragEnd: handleDragEnd
+            } : {})}
           >
             <FolderGlyph color={folder.color} />
             {renaming ? (
@@ -291,21 +296,21 @@ export default function Tree({ engine }) {
         </div>
         {isOpen && (
           <div className="tree-guide" style={{ "--guide-left": `${24 + depth * 16}px` }}>
-            {kids.map((f) => renderFolder(f, depth + 1))}
-            {kidLinks.map((l) => renderLink(l, depth + 1))}
+            {kids.map((f) => renderFolder(f, depth + 1, global))}
+            {kidLinks.map((l) => renderLink(l, depth + 1, global))}
           </div>
         )}
       </div>
     )
   }
 
-  function renderLink(link, depth) {
+  function renderLink(link, depth, global = false) {
     const selected = isSelected("link", link.id)
     const renaming = renamingId === `link:${link.id}`
-    const inScope = scopeIds.links.has(link.id)
+    const inScope = global ? false : scopeIds.links.has(link.id)
     const key = dragKey("link", link.id)
-    const isDropTarget = dragOverKey === key
-    const isDragging = draggingKeys ? draggingKeys.has(key) : false
+    const isDropTarget = global ? false : dragOverKey === key
+    const isDragging = global ? false : draggingKeys ? draggingKeys.has(key) : false
 
     return (
       <div
@@ -320,16 +325,20 @@ export default function Tree({ engine }) {
           if (typeof chrome !== "undefined" && chrome.tabs) chrome.tabs.create({ url: link.url })
         }}
         onContextMenu={(e) => openContextMenu(e, { type: "link", id: link.id })}
-        onDragOver={(e) => handleDragOverTarget(e, key)}
-        onDragLeave={(e) => handleDragLeaveTarget(e, key)}
-        onDrop={(e) => handleDropTarget(e, link.parentId || null)}
+        {...(!global ? {
+          onDragOver: (e) => handleDragOverTarget(e, key),
+          onDragLeave: (e) => handleDragLeaveTarget(e, key),
+          onDrop: (e) => handleDropTarget(e, link.parentId || null)
+        } : {})}
       >
         <div
-          className="row-content"
-          draggable={!renaming}
-          onDragStart={(e) => handleDragStart(e, "link", link.id)}
-          onDragEnd={handleDragEnd}
-        >
+            className="row-content"
+            draggable={!renaming && !global}
+            {...(!global ? {
+              onDragStart: (e) => handleDragStart(e, "folder", folder.id),
+              onDragEnd: handleDragEnd
+            } : {})}
+          >
           <LinkGlyph link={link} />
           {renaming ? (
             <RenameInput value={renameDraft} onChange={setRenameDraft} onCommit={commitRename} onCancel={() => setRenamingId(null)} />
@@ -363,56 +372,78 @@ export default function Tree({ engine }) {
   function renderFlatFolder(folder) {
     const selected = isSelected("folder", folder.id)
     const renaming = renamingId === `folder:${folder.id}`
-    const count = directCount(folder.id)
+    const isOpen = !!expanded[folder.id]
+    // Global (workspace-agnostic) count/children — this folder may not belong
+    // to the currently active workspace at all.
+    const count = globalDirectCount(folder.id)
     const path = getFolderPath(folder.parentId)
     const wsName = getWorkspaceName(folder.workspaceId)
 
     return (
-      <div
-        key={`sf-${folder.id}`}
-        className={`row${selected ? " row-selected" : ""}`}
-        style={{ paddingLeft: 12 }}
-        onClick={(e) => {
-          e.stopPropagation()
-          clickSelect("folder", folder.id, e)
-        }}
-        onContextMenu={(e) => openContextMenu(e, { type: "folder", id: folder.id })}
-      >
-        <div className="row-content">
-          <FolderGlyph color={folder.color} />
-          {renaming ? (
-            <RenameInput value={renameDraft} onChange={setRenameDraft} onCommit={commitRename} onCancel={() => setRenamingId(null)} />
-          ) : (
-            <span className="row-label">
-              {folder.name}
-              <span className="search-path">{wsName}{path ? ` / ${path}` : ""}</span>
+      <div key={`sf-${folder.id}`}>
+        <div
+          className={`row${selected ? " row-selected" : ""}`}
+          style={{ paddingLeft: 12 }}
+          onClick={(e) => {
+            e.stopPropagation()
+            clickSelect("folder", folder.id, e)
+          }}
+          onContextMenu={(e) => openContextMenu(e, { type: "folder", id: folder.id })}
+        >
+          <button
+            className="chevron-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              setExpanded((prev) => ({ ...prev, [folder.id]: !prev[folder.id] }))
+            }}
+          >
+            <ChevronRight size={13} style={{ transform: isOpen ? "rotate(90deg)" : "rotate(0deg)", transition: "transform .12s ease" }} />
+          </button>
+          <div className="row-content">
+            <FolderGlyph color={folder.color} />
+            {renaming ? (
+              <RenameInput value={renameDraft} onChange={setRenameDraft} onCommit={commitRename} onCancel={() => setRenamingId(null)} />
+            ) : (
+              <span className="row-label">
+                {folder.name}
+                <span className="search-path">{wsName}{path ? ` / ${path}` : ""}</span>
+              </span>
+            )}
+          </div>
+          {!renaming && (
+            <span className="folder-actions">
+              <button
+                className="row-delete"
+                title="Delete"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteOne("folder", folder.id)
+                }}
+              >
+                <X size={13} />
+              </button>
+              <button
+                className={`star-btn${folder.starred ? " star-btn-active" : ""}`}
+                title={folder.starred ? "Unstar folder" : "Star folder"}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleFolderStarred(folder.id)
+                }}
+              >
+                <Star size={13} className="star-icon" />
+              </button>
+              <span className="badge">{count}</span>
             </span>
           )}
         </div>
-        {!renaming && (
-          <span className="folder-actions">
-            <button
-              className="row-delete"
-              title="Delete"
-              onClick={(e) => {
-                e.stopPropagation()
-                deleteOne("folder", folder.id)
-              }}
-            >
-              <X size={13} />
-            </button>
-            <button
-              className={`star-btn${folder.starred ? " star-btn-active" : ""}`}
-              title={folder.starred ? "Unstar folder" : "Star folder"}
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleFolderStarred(folder.id)
-              }}
-            >
-              <Star size={13} className="star-icon" />
-            </button>
-            <span className="badge">{count}</span>
-          </span>
+        {/* Expanded contents render via the normal folder/link renderers in
+            "global" mode: read-only (no drag) since a search hit's children
+            may belong to a different workspace than the active one. */}
+        {isOpen && (
+          <div className="tree-guide" style={{ "--guide-left": "24px" }}>
+            {globalChildFolders(folder.id).map((f) => renderFolder(f, 1, true))}
+            {globalChildLinks(folder.id).map((l) => renderLink(l, 1, true))}
+          </div>
         )}
       </div>
     )

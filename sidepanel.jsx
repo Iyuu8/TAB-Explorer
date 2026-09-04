@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react"
+import React, { useRef, useState, useEffect } from "react"
 import { Maximize2, FolderPlus, Link2, ChevronRight } from "lucide-react"
 
 import logo from "./assets/logo.png"
@@ -21,10 +21,109 @@ import Modal from "./core/sidepanel/components/Modal"
 
 export default function SidePanel() {
   const engine = useTabExplorer()
+  const { loaded } = engine   // pulled out early so hooks below can reference it
   const importInputRef = useRef(null)
   const [wsHeaderDragOver, setWsHeaderDragOver] = useState(false)
+  
+  const [restorableTabs, setRestorableTabs] = useState(null)
+
+  function isRealTab(url) {
+    if (!url) return false;
+    if (url.startsWith("chrome://newtab")) return false;
+    if (url.startsWith("edge://newtab")) return false;
+    if (url.startsWith("about:blank")) return false;
+    return true;
+  }
+
+  useEffect(() => {
+    // Wait until the engine has fully loaded before checking session
+    // Without this, setRestorableTabs fires while loaded=false (early return),
+    // so the state update is lost when loaded flips to true and re-renders.
+    if (!loaded) return;
+    if (typeof chrome === "undefined" || !chrome.storage) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        console.log("[TabExplorer:DEBUG] Step 1 — effect running, cancelled =", cancelled);
+
+        const { lastKnownSession } = await chrome.storage.local.get("lastKnownSession");
+        console.log("[TabExplorer:DEBUG] Step 2 — lastKnownSession =", lastKnownSession);
+
+        if (!lastKnownSession || !lastKnownSession.length) {
+          console.log("[TabExplorer:DEBUG] ABORT — no lastKnownSession in storage");
+          return;
+        }
+
+        const normalize = (url) => {
+          try {
+            const u = new URL(url);
+            return u.origin + u.pathname.replace(/\/$/, "") + u.search;
+          } catch { return url; }
+        };
+
+        const savedRealUrls = new Set(
+          lastKnownSession.filter(t => isRealTab(t.url)).map(t => normalize(t.url))
+        );
+        console.log("[TabExplorer:DEBUG] Step 3 — savedRealUrls =", [...savedRealUrls]);
+
+        if (savedRealUrls.size === 0) {
+          console.log("[TabExplorer:DEBUG] ABORT — no real tabs in saved session");
+          return;
+        }
+
+        const currentTabs = await chrome.tabs.query({});
+        const currentRealUrls = new Set(
+          currentTabs.filter(t => isRealTab(t.url)).map(t => normalize(t.url))
+        );
+        console.log("[TabExplorer:DEBUG] Step 4 — currentRealUrls =", [...currentRealUrls]);
+
+        let missingUrl = null;
+        for (const url of savedRealUrls) {
+          if (!currentRealUrls.has(url)) { missingUrl = url; break; }
+        }
+        console.log("[TabExplorer:DEBUG] Step 5 — first missing URL =", missingUrl, "| cancelled =", cancelled);
+
+        if (missingUrl && !cancelled) {
+          console.log("[TabExplorer:DEBUG] Step 6 — SHOWING BANNER ✅");
+          setRestorableTabs(lastKnownSession);
+        } else if (!missingUrl) {
+          console.log("[TabExplorer:DEBUG] ABORT — all saved tabs are already open, no banner needed");
+        } else if (cancelled) {
+          console.log("[TabExplorer:DEBUG] ABORT — cancelled=true (React Strict Mode cleanup ran first)");
+        }
+      } catch (e) {
+        console.error("[TabExplorer:DEBUG] ERROR in session check:", e);
+      }
+    })();
+
+    return () => {
+      console.log("[TabExplorer:DEBUG] cleanup — setting cancelled=true");
+      cancelled = true;
+    };
+  }, [loaded]);  // re-runs when loaded flips to true; the !loaded guard above ensures it only does real work once
+
+  function handleRestoreSession() {
+    if (restorableTabs) {
+      restorableTabs.forEach(tab => {
+        if (isRealTab(tab.url)) {
+          chrome.tabs.create({ url: tab.url, active: tab.active, pinned: tab.pinned });
+        }
+      });
+    }
+    // Clear lastKnownSession so the banner doesn't reappear after restore
+    chrome.storage.local.remove("lastKnownSession");
+    setRestorableTabs(null);
+  }
+
+  function handleDismissSession() {
+    // Clear lastKnownSession so the banner doesn't reappear after dismissal
+    chrome.storage.local.remove("lastKnownSession");
+    setRestorableTabs(null);
+  }
+
   const {
-    workspaces, activeWorkspace, activeWorkspaceId, loaded,
+    workspaces, activeWorkspace, activeWorkspaceId,
     selection, selectedFolderId,
     clickSelect, isSelected, clearSelection,
     search, setSearch,
@@ -104,6 +203,21 @@ export default function SidePanel() {
           <Maximize2 size={14} />
         </button>
       </header>
+
+      {restorableTabs && (
+        <div className="modal-overlay" style={{ zIndex: 2000 }}>
+          <div className="modal-box" style={{ textAlign: 'center' }}>
+            <div className="modal-title" style={{ fontSize: '15px', marginBottom: '6px' }}>🔄 Restore Previous Session?</div>
+            <p className="modal-text" style={{ marginBottom: '16px' }}>
+              You had <strong>{restorableTabs.filter(t => isRealTab(t.url)).length} tab{restorableTabs.filter(t => isRealTab(t.url)).length !== 1 ? 's' : ''}</strong> open last time. Want to reopen them?
+            </p>
+            <div className="modal-actions">
+              <button type="button" className="btn-secondary" onClick={handleDismissSession}>Dismiss</button>
+              <button type="button" className="btn-primary" onClick={handleRestoreSession}>Restore</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <Toolbar
         onSaveTabs={onSaveTabsClick}

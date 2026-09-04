@@ -19,3 +19,46 @@ chrome.runtime.onInstalled.addListener(() => {
 chrome.sidePanel
   .setPanelBehavior({ openPanelOnActionClick: true })
   .catch((error) => console.error("[TabExplorer] setPanelBehavior failed:", error))
+
+// --- Session Restoration Feature (Explicit State Machine) ---
+
+let saveTimeout = null;
+const SAVE_DELAY = 2000;
+
+// Helper to check if a URL is a "real" tab worth saving
+function isRealTab(url) {
+  if (!url) return false;
+  if (url.startsWith("chrome://newtab")) return false;
+  if (url.startsWith("edge://newtab")) return false;
+  if (url.startsWith("about:blank")) return false;
+  return true;
+}
+
+function scheduleSessionSave() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(async () => {
+    try {
+      const tabs = await chrome.tabs.query({});
+      const sessionTabs = tabs.map(t => ({ url: t.url, active: t.active, pinned: t.pinned }));
+      
+      const hasRealTabs = sessionTabs.some(t => isRealTab(t.url));
+      
+      if (hasRealTabs) {
+        await chrome.storage.local.set({ lastKnownSession: sessionTabs });
+      }
+    } catch (error) {
+      console.error("[TabExplorer] Failed to save session:", error);
+    }
+  }, SAVE_DELAY);
+}
+
+// Track tab changes to keep the snapshot up-to-date
+chrome.tabs.onCreated.addListener(scheduleSessionSave);
+chrome.tabs.onUpdated.addListener(scheduleSessionSave);
+chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+  // CRITICAL: If the window is closing, do NOT update the snapshot.
+  if (removeInfo.isWindowClosing) return;
+  scheduleSessionSave();
+});
+
+

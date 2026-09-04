@@ -33,6 +33,10 @@ export function faviconUrl(domain) {
 }
 
 export function inferLinkIcon(url = "", title = "") {
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.id && url) {
+    return `chrome-extension://${chrome.runtime.id}/_favicon/?pageUrl=${encodeURIComponent(url)}&size=64`
+  }
+
   const text = `${url} ${title}`.toLowerCase()
   const pairs = [
     ["chatgpt", "chatgpt.com"],

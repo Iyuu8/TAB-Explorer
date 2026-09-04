@@ -299,9 +299,14 @@ export function useTabExplorer() {
   // CRUD
   // -------------------------------------------------------------------
   function createWorkspace(name) {
+    const cleanName = name.trim() || "Untitled Workspace"
+    if (workspaces.some(w => w.name.toLowerCase() === cleanName.toLowerCase())) {
+      setToast("A workspace with this name already exists")
+      return
+    }
     pushHistory()
     const now = Date.now()
-    const ws = { id: makeId(), name: name.trim() || "Untitled Workspace", createdAt: now, updatedAt: now }
+    const ws = { id: makeId(), name: cleanName, createdAt: now, updatedAt: now }
     setWorkspaces((prev) => [...prev, ws])
     setActiveWorkspaceId(ws.id)
   }
@@ -321,19 +326,28 @@ export function useTabExplorer() {
 
   function createFolder(name, parentId) {
     if (!activeWorkspaceId) return
+    const cleanName = name.trim() || "New Folder"
+    if (folders.some(f => f.workspaceId === activeWorkspaceId && f.parentId === (parentId || null) && f.name.toLowerCase() === cleanName.toLowerCase())) {
+      setToast("A folder with this name already exists here")
+      return
+    }
     pushHistory()
     const now = Date.now()
-    const folder = makeFolderRecord(name, parentId, now)
+    const folder = makeFolderRecord(cleanName, parentId, now)
     setFolders((prev) => [...prev, folder])
     if (parentId) setExpanded((prev) => ({ ...prev, [parentId]: true }))
   }
 
   function createLink(title, url, parentId) {
     if (!activeWorkspaceId || !url.trim()) return
-    pushHistory()
-    const now = Date.now()
     const cleanTitle = title.trim() || url.trim()
     const cleanUrl = url.trim()
+    if (links.some(l => l.workspaceId === activeWorkspaceId && l.parentId === (parentId || null) && l.title.toLowerCase() === cleanTitle.toLowerCase())) {
+      setToast("A link with this name already exists here")
+      return
+    }
+    pushHistory()
+    const now = Date.now()
     const link = {
       id: makeId(), workspaceId: activeWorkspaceId, parentId: parentId || null,
       title: cleanTitle, url: cleanUrl, favicon: "", icon: inferLinkIcon(cleanUrl, cleanTitle), createdAt: now, updatedAt: now
@@ -350,6 +364,11 @@ export function useTabExplorer() {
   function updateFolderDetails(id, name, color, starred) {
     const cleanName = name.trim()
     if (!cleanName) return
+    const target = folders.find(f => f.id === id)
+    if (target && folders.some(f => f.id !== id && f.workspaceId === target.workspaceId && f.parentId === target.parentId && f.name.toLowerCase() === cleanName.toLowerCase())) {
+      setToast("A folder with this name already exists here")
+      return
+    }
     pushHistory()
     setFolders((prev) => prev.map((f) => (
       f.id === id
@@ -366,6 +385,10 @@ export function useTabExplorer() {
   function updateWorkspaceName(id, name) {
     const cleanName = name.trim()
     if (!cleanName) return
+    if (workspaces.some(w => w.id !== id && w.name.toLowerCase() === cleanName.toLowerCase())) {
+      setToast("A workspace with this name already exists")
+      return
+    }
     pushHistory()
     setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, name: cleanName, updatedAt: Date.now() } : w)))
   }
@@ -374,6 +397,11 @@ export function useTabExplorer() {
     const cleanUrl = url.trim()
     if (!cleanUrl) return
     const cleanTitle = title.trim() || cleanUrl
+    const target = links.find(l => l.id === id)
+    if (target && links.some(l => l.id !== id && l.workspaceId === target.workspaceId && l.parentId === target.parentId && l.title.toLowerCase() === cleanTitle.toLowerCase())) {
+      setToast("A link with this name already exists here")
+      return
+    }
     pushHistory()
     setLinks((prev) => prev.map((l) => (
       l.id === id
@@ -392,6 +420,24 @@ export function useTabExplorer() {
     const [type, id] = renamingId.split(":")
     const name = renameDraft.trim()
     if (name) {
+      if (type === "folder") {
+        const target = folders.find(f => f.id === id)
+        if (target && folders.some(f => f.id !== id && f.workspaceId === target.workspaceId && f.parentId === target.parentId && f.name.toLowerCase() === name.toLowerCase())) {
+          setToast("A folder with this name already exists here")
+          return
+        }
+      } else if (type === "link") {
+        const target = links.find(l => l.id === id)
+        if (target && links.some(l => l.id !== id && l.workspaceId === target.workspaceId && l.parentId === target.parentId && l.title.toLowerCase() === name.toLowerCase())) {
+          setToast("A link with this name already exists here")
+          return
+        }
+      } else if (type === "workspace") {
+        if (workspaces.some(w => w.id !== id && w.name.toLowerCase() === name.toLowerCase())) {
+          setToast("A workspace with this name already exists")
+          return
+        }
+      }
       pushHistory()
       if (type === "folder") setFolders((prev) => prev.map((f) => (f.id === id ? { ...f, name, updatedAt: Date.now() } : f)))
       else if (type === "link") setLinks((prev) => prev.map((l) => (l.id === id ? { ...l, title: name, updatedAt: Date.now() } : l)))
@@ -473,8 +519,8 @@ export function useTabExplorer() {
         const { folderIds: desc } = collectDescendants(fid)
         if (desc.includes(targetFolderId)) folderIds.delete(fid) // no dropping a folder into itself
       })
-      setFolders((prev) => prev.map((f) => (folderIds.has(f.id) ? { ...f, parentId: targetFolderId, updatedAt: now } : f)))
-      setLinks((prev) => prev.map((l) => (linkIds.has(l.id) ? { ...l, parentId: targetFolderId, updatedAt: now } : l)))
+      setFolders((prev) => prev.map((f) => (folderIds.has(f.id) ? { ...f, parentId: targetFolderId, workspaceId: activeWorkspaceId, updatedAt: now } : f)))
+      setLinks((prev) => prev.map((l) => (linkIds.has(l.id) ? { ...l, parentId: targetFolderId, workspaceId: activeWorkspaceId, updatedAt: now } : l)))
       setClipboard(null)
     } else {
       const newFolders = []
@@ -482,16 +528,16 @@ export function useTabExplorer() {
       function duplicateFolder(sourceId, newParentId) {
         const src = folders.find((f) => f.id === sourceId)
         if (!src) return
-        const clone = { ...src, id: makeId(), parentId: newParentId, createdAt: now, updatedAt: now }
+        const clone = { ...src, id: makeId(), parentId: newParentId, workspaceId: activeWorkspaceId, createdAt: now, updatedAt: now }
         newFolders.push(clone)
         folders.filter((f) => f.parentId === sourceId).forEach((f) => duplicateFolder(f.id, clone.id))
-        links.filter((l) => l.parentId === sourceId).forEach((l) => newLinks.push({ ...l, id: makeId(), parentId: clone.id, createdAt: now, updatedAt: now }))
+        links.filter((l) => l.parentId === sourceId).forEach((l) => newLinks.push({ ...l, id: makeId(), parentId: clone.id, workspaceId: activeWorkspaceId, createdAt: now, updatedAt: now }))
       }
       clipboard.items.forEach((it) => {
         if (it.type === "folder") duplicateFolder(it.id, targetFolderId)
         else {
           const src = links.find((l) => l.id === it.id)
-          if (src) newLinks.push({ ...src, id: makeId(), parentId: targetFolderId, createdAt: now, updatedAt: now })
+          if (src) newLinks.push({ ...src, id: makeId(), parentId: targetFolderId, workspaceId: activeWorkspaceId, createdAt: now, updatedAt: now })
         }
       })
       setFolders((prev) => [...prev, ...newFolders])
@@ -512,7 +558,7 @@ export function useTabExplorer() {
   // the clipboard. Shares the same "no dropping a folder into itself or
   // its own descendants" guard as cut/paste.
   // -------------------------------------------------------------------
-  function moveItems(items, targetFolderId) {
+  function moveItems(items, targetFolderId, targetWorkspaceId = activeWorkspaceId) {
     if (!items || !items.length) return
 
     const folderItems = items.filter((i) => i.type === "folder")
@@ -529,15 +575,32 @@ export function useTabExplorer() {
     )
     const validLinkIds = new Set(linkItems.map((i) => i.id))
 
-    const changedFolders = folders.some((f) => validFolderIds.has(f.id) && f.parentId !== targetFolderId)
-    const changedLinks = links.some((l) => validLinkIds.has(l.id) && l.parentId !== targetFolderId)
+    const changedFolders = folders.some((f) => validFolderIds.has(f.id) && (f.parentId !== targetFolderId || f.workspaceId !== targetWorkspaceId))
+    const changedLinks = links.some((l) => validLinkIds.has(l.id) && (l.parentId !== targetFolderId || l.workspaceId !== targetWorkspaceId))
     if (!changedFolders && !changedLinks) return
+
+    // If moving to a new workspace, we must update the workspaceId of all descendants too!
+    const descendantFolderIds = new Set()
+    const descendantLinkIds = new Set()
+    validFolderIds.forEach((id) => {
+      const { folderIds, linkIds } = collectDescendants(id)
+      folderIds.forEach(fid => descendantFolderIds.add(fid))
+      linkIds.forEach(lid => descendantLinkIds.add(lid))
+    })
 
     pushHistory()
     const now = Date.now()
-    setFolders((prev) => prev.map((f) => (validFolderIds.has(f.id) ? { ...f, parentId: targetFolderId, updatedAt: now } : f)))
-    setLinks((prev) => prev.map((l) => (validLinkIds.has(l.id) ? { ...l, parentId: targetFolderId, updatedAt: now } : l)))
-    if (targetFolderId) setExpanded((prev) => ({ ...prev, [targetFolderId]: true }))
+    setFolders((prev) => prev.map((f) => {
+      if (validFolderIds.has(f.id)) return { ...f, parentId: targetFolderId, workspaceId: targetWorkspaceId, updatedAt: now }
+      if (descendantFolderIds.has(f.id)) return { ...f, workspaceId: targetWorkspaceId, updatedAt: now }
+      return f
+    }))
+    setLinks((prev) => prev.map((l) => {
+      if (validLinkIds.has(l.id)) return { ...l, parentId: targetFolderId, workspaceId: targetWorkspaceId, updatedAt: now }
+      if (descendantLinkIds.has(l.id)) return { ...l, workspaceId: targetWorkspaceId, updatedAt: now }
+      return l
+    }))
+    if (targetFolderId && targetWorkspaceId === activeWorkspaceId) setExpanded((prev) => ({ ...prev, [targetFolderId]: true }))
     setToast(`Moved ${validFolderIds.size + validLinkIds.size} item(s)`)
   }
 

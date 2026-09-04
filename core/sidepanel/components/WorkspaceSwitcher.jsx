@@ -9,6 +9,8 @@ export default function WorkspaceSwitcher({ workspaces, activeWorkspaceId, onSel
           <button
             key={w.id}
             className={`ws-pill${w.id === activeWorkspaceId ? " ws-pill-active" : ""}`}
+            data-dropkey={`workspace:${w.id}`}
+            data-droptarget={`__workspace__${w.id}`}
             onClick={() => onSelect(w.id)}
             onContextMenu={(e) => onContextMenu(e, { type: "workspace", id: w.id })}
           >

@@ -65,13 +65,14 @@ const AUTO_SCROLL_STEP = 4
 
 export default function Tree({ engine }) {
   const {
+    activeWorkspaceId,
     childFolders, childLinks, wsFolders, wsLinks, expanded, setExpanded,
     isSelected, clickSelect, directCount, selection, selectedFolderId,
     renamingId, renameDraft, setRenameDraft, commitRename, setRenamingId, startRename,
     openContextMenu, query, deleteOne, toggleFolderStarred, clearSelection,
     globalSearchResults, getFolderPath, getWorkspaceName,
     globalChildFolders, globalChildLinks, globalDirectCount,
-    moveItems
+    moveItems, setToast, setActiveWorkspaceId
   } = engine
 
   const [hoveredFolderId, setHoveredFolderId] = useState(null)
@@ -79,13 +80,10 @@ export default function Tree({ engine }) {
 
   // Drag & drop UI state (purely visual — the actual mutation lives in moveItems).
   const [dragOverKey, setDragOverKey] = useState(null)
-  // Set of dragKey(type,id) for every item currently being dragged, so a
-  // multi-select drag highlights all of them, not just the row the gesture
-  // started on.
-  const [draggingKeys, setDraggingKeys] = useState(null)
-  // Tracks the pointer's last clientY during drag so a continuous auto-scroll
-  // loop (see effect below) can run independently of dragover event frequency.
-  const lastDragY = useRef(null)
+  const pointerDragRef = useRef(null)
+  const lastHoveredTargetRef = useRef(null)
+  const [pointerDragPos, setPointerDragPos] = useState(null)
+  const draggingKeys = pointerDragPos ? new Set(pointerDragRef.current.items.map(it => dragKey(it.type, it.id))) : null
 
   const treeContainerRef = useRef(null)
 
@@ -106,66 +104,104 @@ export default function Tree({ engine }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeFolderId, childFolders, childLinks, wsFolders, wsLinks])
 
-  function autoScrollOnDrag(e) {
-    lastDragY.current = e.clientY
-  }
-
-  // Runs a continuous scroll loop for the duration of a drag, independent of
-  // how often dragover fires (Chrome suppresses wheel entirely during native
-  // drag, so this is the only way to scroll the list while dragging).
   useEffect(() => {
-    if (draggingKeys === null) return
-    let raf
-    function tick() {
-      const el = treeContainerRef.current
-      const y = lastDragY.current
-      if (el && y !== null) {
-        const rect = el.getBoundingClientRect()
-        if (y - rect.top < AUTO_SCROLL_THRESHOLD) {
-          el.scrollTop = Math.max(0, el.scrollTop - AUTO_SCROLL_STEP)
-        } else if (rect.bottom - y < AUTO_SCROLL_THRESHOLD) {
-          el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + AUTO_SCROLL_STEP)
+    function onPointerMove(e) {
+      const state = pointerDragRef.current
+      if (!state) return
+      
+      if (!state.active) {
+        const dx = e.clientX - state.startX
+        const dy = e.clientY - state.startY
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+          state.active = true
+        } else {
+          return
         }
       }
-      raf = requestAnimationFrame(tick)
+
+      setPointerDragPos({ x: e.clientX, y: e.clientY, numItems: state.items.length })
+      
+      const el = document.elementFromPoint(e.clientX, e.clientY)
+      let newDragOverKey = null
+      let targetEl = null
+      if (el) {
+        targetEl = el.closest('[data-dropkey]')
+        if (targetEl) {
+           newDragOverKey = targetEl.getAttribute('data-dropkey')
+        }
+      }
+      setDragOverKey(newDragOverKey)
+
+      if (lastHoveredTargetRef.current !== targetEl) {
+        if (lastHoveredTargetRef.current) {
+          lastHoveredTargetRef.current.classList.remove('ws-header-drop-target')
+        }
+        if (targetEl && newDragOverKey && newDragOverKey.startsWith('workspace:')) {
+          targetEl.classList.add('ws-header-drop-target')
+        }
+        lastHoveredTargetRef.current = targetEl
+      }
     }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [draggingKeys])
 
-  function handleDragStart(e, type, id) {
-    e.stopPropagation()
-    const items = isSelected(type, id) && selection.length > 1 ? selection : [{ type, id }]
-    e.dataTransfer.effectAllowed = "move"
-    e.dataTransfer.setData("text/plain", JSON.stringify(items))
-    setDraggingKeys(new Set(items.map((it) => dragKey(it.type, it.id))))
+    function onPointerUp(e) {
+      if (lastHoveredTargetRef.current) {
+        lastHoveredTargetRef.current.classList.remove('ws-header-drop-target')
+        lastHoveredTargetRef.current = null
+      }
+      const state = pointerDragRef.current
+      if (state && state.active) {
+         try {
+           const el = document.elementFromPoint(e.clientX, e.clientY)
+           if (el) {
+              const targetEl = el.closest('[data-dropkey]')
+              if (targetEl) {
+                 const target = targetEl.getAttribute('data-droptarget')
+                 let targetFolderId = null
+                 let targetWorkspaceId = activeWorkspaceId
 
-    if (items.length > 1) {
-      const preview = document.createElement("div")
-      preview.textContent = `${items.length} items`
-      preview.style.cssText = `
-        position: absolute; top: -1000px; left: -1000px;
-        padding: 4px 10px; background: var(--selected-bg); color: var(--selected-fg);
-        font-size: 12px; font-family: inherit; border-radius: 6px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3); white-space: nowrap;
-      `
-      document.body.appendChild(preview)
-      e.dataTransfer.setDragImage(preview, 14, 14)
-      setTimeout(() => document.body.removeChild(preview), 0)
+                 if (target === "__root__") {
+                     targetFolderId = null
+                     targetWorkspaceId = activeWorkspaceId
+                 } else if (target && target.startsWith("__workspace__")) {
+                     targetFolderId = null
+                     targetWorkspaceId = target.slice("__workspace__".length)
+                 } else {
+                     targetFolderId = target
+                     targetWorkspaceId = activeWorkspaceId
+                 }
+                 
+                 engine.moveItems(state.items, targetFolderId, targetWorkspaceId)
+                 engine.clearSelection() // Clear selection so it doesn't look stuck
+                 if (targetWorkspaceId !== activeWorkspaceId) {
+                   engine.setActiveWorkspaceId(targetWorkspaceId)
+                 }
+                 if (engine.setToast) engine.setToast(`Moved to workspace ${targetWorkspaceId}`)
+              }
+           }
+         } catch (err) {
+           if (engine.setToast) engine.setToast(`Error: ${err.message}`)
+         }
+      }
+      pointerDragRef.current = null
+      setPointerDragPos(null)
+      setDragOverKey(null)
     }
-  }
 
-  function handleDragEnd() {
-    setDraggingKeys(null)
-    setDragOverKey(null)
-  }
+    window.addEventListener("pointermove", onPointerMove)
+    window.addEventListener("pointerup", onPointerUp)
+    window.addEventListener("pointercancel", onPointerUp)
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove)
+      window.removeEventListener("pointerup", onPointerUp)
+      window.removeEventListener("pointercancel", onPointerUp)
+    }
+  }, [moveItems])
 
   function handleDragOverTarget(e, key) {
     e.preventDefault()
     e.stopPropagation()
     e.dataTransfer.dropEffect = "move"
     setDragOverKey(key)
-    autoScrollOnDrag(e)
   }
 
   function handleDragLeaveTarget(e, key) {
@@ -177,7 +213,6 @@ export default function Tree({ engine }) {
     e.preventDefault()
     e.stopPropagation()
     setDragOverKey(null)
-    setDraggingKeys(null)
     const raw = e.dataTransfer.getData("text/plain")
     if (!raw) return
     try {
@@ -191,7 +226,6 @@ export default function Tree({ engine }) {
   function handleTreeDragOver(e) {
     e.preventDefault()
     setDragOverKey("__root__")
-    autoScrollOnDrag(e)
   }
 
   function handleTreeDragLeave(e) {
@@ -223,6 +257,8 @@ export default function Tree({ engine }) {
         <div
           className={`row${selected ? " row-selected" : ""}${inScope ? " row-in-scope" : ""}${isDropTarget ? " row-drop-target" : ""}${isDragging ? " row-dragging" : ""}`}
           style={{ paddingLeft: 12 + depth * 16 }}
+          data-dropkey={key}
+          data-droptarget={folder.id}
           onClick={(e) => {
             e.stopPropagation()
             clickSelect("folder", folder.id, e)
@@ -252,10 +288,12 @@ export default function Tree({ engine }) {
               accidentally starts a drag and always toggles reliably. */}
           <div
             className="row-content"
-            draggable={!renaming && !global}
-            {...(!global ? {
-              onDragStart: (e) => handleDragStart(e, "folder", folder.id),
-              onDragEnd: handleDragEnd
+            {...(!global && !renaming ? {
+              onPointerDown: (e) => {
+                if (e.button !== 0) return
+                const items = isSelected("folder", folder.id) && selection.length > 1 ? selection : [{ type: "folder", id: folder.id }]
+                pointerDragRef.current = { active: false, items, startX: e.clientX, startY: e.clientY }
+              }
             } : {})}
           >
             <FolderGlyph color={folder.color} />
@@ -317,6 +355,8 @@ export default function Tree({ engine }) {
         key={link.id}
         className={`row${selected ? " row-selected" : ""}${inScope ? " row-in-scope" : ""}${isDropTarget ? " row-drop-target" : ""}${isDragging ? " row-dragging" : ""}`}
         style={{ paddingLeft: 12 + depth * 16 + 19 }}
+        data-dropkey={key}
+        data-droptarget={link.parentId || "__root__"}
         onClick={(e) => {
           e.stopPropagation()
           clickSelect("link", link.id, e)
@@ -333,10 +373,12 @@ export default function Tree({ engine }) {
       >
         <div
             className="row-content"
-            draggable={!renaming && !global}
-            {...(!global ? {
-              onDragStart: (e) => handleDragStart(e, "folder", folder.id),
-              onDragEnd: handleDragEnd
+            {...(!global && !renaming ? {
+              onPointerDown: (e) => {
+                if (e.button !== 0) return
+                const items = isSelected("link", link.id) && selection.length > 1 ? selection : [{ type: "link", id: link.id }]
+                pointerDragRef.current = { active: false, items, startX: e.clientX, startY: e.clientY }
+              }
             } : {})}
           >
           <LinkGlyph link={link} />
@@ -520,6 +562,8 @@ export default function Tree({ engine }) {
     <div
       className={`tree${dragOverKey === "__root__" ? " tree-drop-target" : ""}`}
       ref={treeContainerRef}
+      data-dropkey="__root__"
+      data-droptarget="__root__"
       onClick={handleEmptyClick}
       onMouseLeave={() => setHoveredFolderId(null)}
       onDragOver={handleTreeDragOver}
@@ -530,6 +574,24 @@ export default function Tree({ engine }) {
       {childLinks(null).map((l) => renderLink(l, 0))}
       {wsFolders.length === 0 && wsLinks.length === 0 && (
         <div className="empty-state">No folders yet. Save your current tabs or create a folder to get started.</div>
+      )}
+      {pointerDragPos && (
+        <div style={{
+          position: "fixed",
+          top: pointerDragPos.y + 14,
+          left: pointerDragPos.x + 14,
+          padding: "4px 10px",
+          background: "var(--selected-bg)",
+          color: "var(--selected-fg)",
+          fontSize: 12,
+          borderRadius: 6,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+          whiteSpace: "nowrap",
+          pointerEvents: "none",
+          zIndex: 9999
+        }}>
+          {pointerDragPos.numItems} item{pointerDragPos.numItems !== 1 ? 's' : ''}
+        </div>
       )}
     </div>
   )

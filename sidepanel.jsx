@@ -87,7 +87,8 @@ export default function SidePanel() {
   const isWorkspaceRowSelected = activeWorkspace ? isSelected("workspace", activeWorkspace.id) : false
 
   function onPanelClick(e) {
-    if (e.target === e.currentTarget) clearSelection()
+    if (e.target.closest('button, input')) return
+    clearSelection()
   }
 
   return (
@@ -126,6 +127,8 @@ export default function SidePanel() {
         <>
           <div
             className={`ws-header${isWorkspaceRowSelected ? " ws-header-selected" : ""}${wsHeaderDragOver ? " ws-header-drop-target" : ""}`}
+            data-dropkey={`workspace:${activeWorkspace.id}`}
+            data-droptarget="__root__"
             onClick={(e) => {
               e.stopPropagation()
               clickSelect("workspace", activeWorkspace.id, e)

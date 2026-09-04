@@ -28,6 +28,6 @@
     "host_permissions": [
       "https://*/*"
     ],
-    "permissions": ["tabs", "storage", "sidePanel"]
+    "permissions": ["tabs", "storage", "sidePanel", "favicon"]
   }
 }

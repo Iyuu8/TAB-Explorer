@@ -31,3 +31,10 @@ dist/
 
 # typescript
 .tsbuildinfo
+
+# context files 
+session_restore_troubleshooting.md
+context.md
+TabExplorer_Cahier_des_Charges.md
+TabExplorer_Cahier_des_Charges.pdf
+ui_draft.png
